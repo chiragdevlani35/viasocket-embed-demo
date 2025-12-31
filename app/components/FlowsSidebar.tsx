@@ -2,6 +2,13 @@
 
 import { useEffect, useEffectEvent, useState } from 'react';
 
+// Declare global function from ViaSocket embed script
+declare global {
+  interface Window {
+    openViasocket?: (flowId?: string) => void;
+  }
+}
+
 interface Integration {
   id: string;
   title: string;
@@ -58,7 +65,11 @@ export default function FlowsSidebar({ selectedUser, jwtToken }: FlowsSidebarPro
   function openEmbed(flowid?:string){
     const parentElement=document.getElementById(`viasocket-embed-${selectedUser}`)
     if(parentElement) parentElement.style.display='flex'
-openViasocket(flowid)
+    
+    // Call the global openViasocket function if it exists
+    if (typeof window !== 'undefined' && window.openViasocket) {
+      window.openViasocket(flowid)
+    }
   }
   const handleAddNewIntegration = () => {
  openEmbed()
@@ -67,6 +78,49 @@ openViasocket(flowid)
   const handleIntegrationClick = (integrationId: string) => {
     // Set query param for specific integration
      openEmbed(integrationId)
+  };
+
+  const handleDeleteIntegration = async (integrationId: string, event: React.MouseEvent) => {
+    // Prevent the click from bubbling up to the parent div
+    event.stopPropagation();
+    
+    if (!jwtToken) {
+      setError('No authorization token available');
+      return;
+    }
+
+    // Show confirmation dialog
+    if (!confirm('Are you sure you want to delete this integration?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`https://flow-api.viasocket.com/embed/updatestatus/${integrationId}?status=0`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': jwtToken,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        // Update the integration status to "deleted" (soft delete)
+        setIntegrations(prevIntegrations => 
+          prevIntegrations.map(integration => 
+            integration.id === integrationId 
+              ? { ...integration, status: 'deleted' }
+              : integration
+          )
+        );
+        console.log('Integration marked as deleted:', integrationId);
+      } else {
+        setError(`Failed to delete integration: ${response.status}`);
+        console.error('Delete failed:', response.status);
+      }
+    } catch (error) {
+      console.error('Error deleting integration:', error);
+      setError('Error deleting integration');
+    }
   };
 
   const listenToViasocket=useEffectEvent((e)=>{
@@ -173,17 +227,44 @@ openViasocket(flowid)
               <div
                 key={integration.id || index}
                 onClick={() => handleIntegrationClick(integration.id)}
-                className="p-3 mb-2 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                className="p-3 mb-2 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer relative group"
               >
                 <div className='flex items-center gap-2'>
                     <img src={integration?.serviceIcons?.[0]} style={{width:'24px'}} alt="" />
-                      <h3 className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                      <h3 className="font-medium text-gray-900 dark:text-white text-sm truncate flex-1">
                   {integration.title || `Integration ${index + 1}`}
                 </h3>
+                    {integration.status !== 'deleted' && (
+                      <button
+                        onClick={(e) => handleDeleteIntegration(integration.id, e)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
+                        title="Delete integration"
+                      >
+                        <svg 
+                          width="16" 
+                          height="16" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="3,6 5,6 21,6"></polyline>
+                          <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                          <line x1="10" y1="11" x2="10" y2="17"></line>
+                          <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                      </button>
+                    )}
                     </div>
               
                 {integration.status && (
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                  <p className={`text-xs mt-1 ${
+                    integration.status === 'deleted' 
+                      ? 'text-red-600 dark:text-red-400 font-medium' 
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}>
                     Status: {integration.status}
                   </p>
                 )}
